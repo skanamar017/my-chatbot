@@ -122,19 +122,42 @@
     const inputEl = document.getElementById('user-input');
     const sendBtn = document.getElementById('send-btn');
 
-    async function getReply() {
+    const SYSTEM_PROMPT = "You are a helpful, concise assistant. Answer directly without restating the question or adding unnecessary preamble.";
+    let temperature = 0.7;
+
+    async function getReply(onChunk) {
     const res = await fetch('http://localhost:11434/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: 'llama3.2',
-        messages: history,
-        stream: false
+        messages: [
+          { role: 'system', content: SYSTEM_PROMPT }, 
+          ...history
+        ],
+        options: {
+          temperature: temperature
+        },
+        stream: true
       })
       });
 
-      const data = await res.json();
-      return data.message.content;
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let fullReply='';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const text = decoder.decode(value);
+        const json = JSON.parse(text);
+        fullReply += json.message.content;
+
+        onChunk(fullReply);
+      }
+
+      return fullReply;
     }
 
     inputEl.addEventListener('keydown', function(e) {
@@ -163,11 +186,10 @@
     thinkingBubble.textContent = 'thinking…';
     messagesEl.appendChild(thinkingBubble);
 
-    const reply = await getReply();
-
-    thinkingBubble.textContent = reply;  // 👈 replaces "thinking…" with the actual reply
-
-    messagesEl.scrollTop = messagesEl.scrollHeight;
+    const reply = await getReply(text => {
+      thinkingBubble.textContent = text;
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    });
 
     history.push({ role: 'assistant', content: reply });
     sendBtn.disabled = false;
